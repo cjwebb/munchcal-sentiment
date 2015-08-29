@@ -12,7 +12,12 @@
    :secret-key (System/getProperty "MC_AWS_SECRET_KEY")
    :endpoint "https://dynamodb.eu-west-1.amazonaws.com"})
 
-;; -- data conversion
+;; -- data conversion / generation
+(defn uuid [] (str (java.util.UUID/randomUUID)))
+
+(defn datetime-now []
+  (f/unparse (f/formatters :date-time) (t/now)))
+
 (defn munge-data [data]
   (assoc data :recipe-id (get-in data [:recipe :id])))
 
@@ -21,8 +26,9 @@
 
 ;; -- database access
 (defn insert! [data]
-  (let [now (f/unparse (f/formatters :date-time) (t/now))
-        d (assoc data :datetime now)]
+  (let [now (datetime-now)
+        id (uuid)
+        d (assoc data :datetime now :id id)]
     (do 
       (db/put-item db-opts :mc-sen-user-favs d)
       d)))
