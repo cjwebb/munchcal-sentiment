@@ -5,12 +5,17 @@
             [ring.middleware.json :as middleware]
             [clj-time.core :as t]
             [clj-time.format :as f]
-            [taoensso.faraday :as db]))
+            [taoensso.faraday :as db]
+            [schema.core :as s]
+            [schema.coerce :as coerce]
+            [schema-tools.core :as st]
+            [dire.core :refer :all]))
 
 (def db-opts
-  {:access-key (System/getProperty "MC_AWS_ACCESS_KEY")
-   :secret-key (System/getProperty "MC_AWS_SECRET_KEY")
+  {:access-key (System/getenv "MC_AWS_ACCESS_KEY")
+   :secret-key (System/getenv "MC_AWS_SECRET_KEY")
    :endpoint "https://dynamodb.eu-west-1.amazonaws.com"})
+;   :endpoint (System/getenv "MC_AWS_DYNAMODB_ENDPOINT")})
 
 ;; -- data conversion / generation
 (defn uuid [] (str (java.util.UUID/randomUUID)))
@@ -26,9 +31,7 @@
 
 ;; -- database access
 (defn insert! [data]
-  (let [now (datetime-now)
-        id (uuid)
-        d (assoc data :datetime now :id id)]
+  (let [d (assoc data :datetime (datetime-now) :id (uuid))]
     (do 
       (db/put-item db-opts :mc-sen-user-favs d)
       d)))
@@ -36,40 +39,71 @@
 (defn get! [data]
   (db/query db-opts :mc-sen-user-favs
             {:user-id [:eq (:user-id data)]
-             :datetime [:lt (:from data)]}))
+             :datetime [:lt (:marker data)]}
+            {:order :desc}))
+
+(defn delete!
+  "Firstly, query secondary index to find hash & range,
+   and then conditionally delete item"
+  [id]
+  (let [rows (db/query db-opts :mc-sen-user-favs
+                       {:id [:eq id]}
+                       {:index "id-index"})
+        item (first rows)]
+    (db/delete-item db-opts :mc-sen-user-favs
+                    {:user-id (:user-id item)
+                     :datetime (:datetime item)}
+                    {:expected {:id [:eq id]}})))
 
 ;; -- routes
-;; todo - set 'from' value when it doesn't exist
-;;      - ensure user-id is specified
-;;      - return pagination key
-;;      - define a limit (default 9)
-(defn get-user-favourites [req]
-  (let [{{user-id :user-id from :from} :params} req]
-    {:body 
-      {:data 
-        (map un-munge (get! {:user-id user-id :from from}))}}))
+;; todo - handler marker + limit properly
+(s/defschema GetRequest
+  {:params
+   {:user-id s/Str
+    :marker s/Str
+    (s/optional-key :limit) s/Str}})
 
-;; todo - schema validation
+(defn calculate-marker [results]
+  (when-let [marker (:datetime (last results))]
+    {:marker marker}))
+
+(defn get-user-favourites [req]
+  (let [params  (st/select-schema req GetRequest)
+        data    (:params params)
+        results (map un-munge (get! data))
+        marker  (calculate-marker results)]
+    {:body
+      (merge {:data results} marker)}))
+
+(s/defschema PostRequest
+  {:user-id s/Str
+   :recipe {:id s/Str s/Any s/Any}})
+
+;; todo - make sure document size < 1 KB, as that is 1 write capacity unit
 (defn post-user-favourites [req]
-  (let [{post-body :body} req,
-        {{id :id} :params} req]
+  (let [{post-body :body} req
+        data (st/select-schema post-body PostRequest)]
     {:body (insert! (munge-data post-body))}))
 
-;; todo - use a schema
-(def home-info
-  {:favourites {:path "/favourites"
-                :get {:params {:user-id "user id, uuid"
-                               :from "pagination key, date-time"}}
-                :post {:params {:user-id "user id, uuid"
-                                :recipe "recipe data, json"}}}})
+(defn delete-user-favourites [id]
+  (do
+    (delete! id)
+    {:status 204}))
 
 (defroutes app-routes
-  (GET "/" [] {:body home-info})
+  (GET "/" [] {:body {:application-name "sentiment"}})
   (GET "/favourites" req (get-user-favourites req))
   (POST "/favourites" req (post-user-favourites req))
+  (DELETE "/favourites/:id" [id] (delete-user-favourites id))
   (route/not-found "Not Found"))
 
-;; todo - error handling
+(with-handler! #'app-routes
+  java.lang.Throwable
+  (fn [e & args]
+    (do
+      (println e)
+      {:status 500 :body {:error {:message (.getMessage e)}}})))
+
 (def app
   (wrap-defaults 
     (middleware/wrap-json-body
