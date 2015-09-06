@@ -31,10 +31,12 @@
 
 ;; -- database access
 (defn insert! [data]
-  (let [d (assoc data :datetime (datetime-now) :id (uuid))]
+  (let [generated {:datetime (datetime-now)
+                   :id (uuid)}
+        d (merge data generated)]
     (do 
       (db/put-item db-opts :mc-sen-user-favs d)
-      d)))
+      generated)))
 
 (defn get! [data]
   (db/query db-opts :mc-sen-user-favs
@@ -60,8 +62,12 @@
 (s/defschema GetRequest
   {:params
    {:user-id s/Str
-    :marker s/Str
+    (s/optional-key :marker) s/Str
     (s/optional-key :limit) s/Str}})
+
+(defn default-marker []
+  (f/unparse (f/formatters :date-time)
+             (t/plus (t/now) (t/days 1))))
 
 (defn calculate-marker [results]
   (when-let [marker (:datetime (last results))]
@@ -69,7 +75,7 @@
 
 (defn get-user-favourites [req]
   (let [params  (st/select-schema req GetRequest)
-        data    (:params params)
+        data    (merge {:marker (default-marker)} (:params params))
         results (map un-munge (get! data))
         marker  (calculate-marker results)]
     {:body
@@ -79,11 +85,11 @@
   {:user-id s/Str
    :recipe {:id s/Str s/Any s/Any}})
 
-;; todo - make sure document size < 1 KB, as that is 1 write capacity unit
 (defn post-user-favourites [req]
   (let [{post-body :body} req
         data (st/select-schema post-body PostRequest)]
-    {:body (insert! (munge-data post-body))}))
+    {:status 201
+     :body (insert! (munge-data post-body))}))
 
 (defn delete-user-favourites [id]
   (do
