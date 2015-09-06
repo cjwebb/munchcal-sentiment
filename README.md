@@ -1,6 +1,6 @@
 # sentiment
 
-FIXME
+API for User Sentiments, wrapped around DynamoDB.
 
 ## Prerequisites
 
@@ -14,6 +14,11 @@ To start a web server for the application, run:
 
     lein ring server
 
+Otherwise:
+
+    lein ring uberjar
+    java -jar target/*-standalone.jar
+
 ## License
 
-Copyright © 2015 FIXME
+Copyright © 2015 Colin Webb 
