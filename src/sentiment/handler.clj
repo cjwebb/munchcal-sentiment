@@ -3,6 +3,7 @@
             [compojure.route :as route]
             [ring.middleware.defaults :refer [wrap-defaults api-defaults]]
             [ring.middleware.json :as middleware]
+            [ring.middleware.cors :refer [wrap-cors]]
             [clj-time.core :as t]
             [clj-time.format :as f]
             [taoensso.faraday :as db]
@@ -111,7 +112,10 @@
       {:status 500 :body {:error {:message (.getMessage e)}}})))
 
 (def app
-  (wrap-defaults 
-    (middleware/wrap-json-body
-      (middleware/wrap-json-response app-routes) {:keywords? true}) api-defaults))
+  (-> app-routes
+      (wrap-cors :access-control-allow-origin [#".*"]
+                 :access-control-allow-methods [:get :post :delete])
+      middleware/wrap-json-response
+      (middleware/wrap-json-body {:keywords? true})
+      (wrap-defaults api-defaults)))
 

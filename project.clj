@@ -6,6 +6,7 @@
                  [compojure "1.4.0"]
                  [ring/ring-defaults "0.1.5"]
                  [ring/ring-json "0.4.0"]
+                 [ring-cors "0.1.7"]
                  [clj-time "0.11.0"]
                  [com.taoensso/faraday "1.7.1"]
                  [prismatic/schema "0.4.4"]
